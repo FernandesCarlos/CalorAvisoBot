@@ -1,15 +1,53 @@
-
 import datetime
 import html
 import re
 import sqlite3
 import textwrap
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 
 import database as db
 import gerador_relatorio
+
+
+# =========================================================
+# CONFIGURAÇÃO GLOBAL DAS FONTES
+# =========================================================
+# Altere somente este valor para aumentar ou reduzir as fontes.
+# Exemplos: 1.00 = tamanho original; 1.15 = 15% maior; 1.30 = 30% maior.
+ESCALA_FONTES = 1.15
+
+
+def aplicar_escala_fontes(css: str) -> str:
+    """Multiplica os valores numéricos de todas as declarações font-size do CSS."""
+    padrao = re.compile(r"(font-size\s*:\s*)(\d+(?:\.\d+)?)(rem|px)", re.IGNORECASE)
+
+    def substituir(match):
+        valor = float(match.group(2)) * ESCALA_FONTES
+        unidade = match.group(3)
+        return f"{match.group(1)}{valor:.3f}{unidade}"
+
+    return padrao.sub(substituir, css)
+
+
+def tamanho_fonte_rem(valor: float) -> str:
+    """Retorna um tamanho em rem já ajustado pelo escalar global."""
+    return f"{valor * ESCALA_FONTES:.3f}rem"
+
+
+# Ajuste também a tipografia padrão dos gráficos Matplotlib.
+plt.rcParams.update(
+    {
+        "font.size": 10 * ESCALA_FONTES,
+        "axes.titlesize": 14 * ESCALA_FONTES,
+        "axes.labelsize": 11 * ESCALA_FONTES,
+        "xtick.labelsize": 9 * ESCALA_FONTES,
+        "ytick.labelsize": 9 * ESCALA_FONTES,
+        "legend.fontsize": 10 * ESCALA_FONTES,
+    }
+)
 
 
 # =========================================================
@@ -44,11 +82,12 @@ st.markdown(
 # ESTILIZAÇÃO
 # =========================================================
 
-CSS = """
+CSS_BASE = """
 <style>
     .stApp {
         background: #F4F6F9;
         color: #26374A;
+        font-size: 1rem;
     }
 
     .block-container {
@@ -75,7 +114,7 @@ CSS = """
 
     .dashboard-title {
         color: #20364A;
-        font-size: clamp(1.55rem, 2.5vw, 2.1rem);
+        font-size: 2.1rem;
         font-weight: 700;
         line-height: 1.25;
         letter-spacing: -0.025em;
@@ -206,6 +245,10 @@ CSS = """
         color: #20364A !important;
     }
 
+    h1 {
+        font-size: 2.1rem !important;
+    }
+
     h2 {
         font-size: 1.35rem !important;
         font-weight: 700 !important;
@@ -214,6 +257,26 @@ CSS = """
     h3 {
         font-size: 1.05rem !important;
         font-weight: 650 !important;
+    }
+
+    p, li {
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+
+    div[data-testid="stCaptionContainer"] {
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+
+    div[data-testid="stTextInput"] label,
+    div[data-testid="stSelectbox"] label {
+        font-size: 0.95rem;
+    }
+
+    div[data-testid="stTextInput"] input,
+    div[data-testid="stSelectbox"] input {
+        font-size: 1rem;
     }
 
     hr {
@@ -233,19 +296,20 @@ CSS = """
         .metric-value {
             font-size: 1.7rem;
         }
+
+        .dashboard-title {
+            font-size: 1.8rem;
+        }
     }
 </style>
 """
 
-st.markdown(
-    textwrap.dedent(CSS).strip(),
-    unsafe_allow_html=True,
-)
+CSS = aplicar_escala_fontes(textwrap.dedent(CSS_BASE).strip())
+st.markdown(CSS, unsafe_allow_html=True)
 
 
 # =========================================================
 # FUNÇÃO DE RENDERIZAÇÃO HTML
-# Evita que HTML indentado apareça como bloco de código.
 # =========================================================
 
 def renderizar_html(conteudo):
@@ -285,11 +349,7 @@ parametros_14_dias = (
 conn = sqlite3.connect("saude_mulher.db")
 
 try:
-
-    # -----------------------------------------------------
-    # Total de pacientes ativas
-    # -----------------------------------------------------
-
+    # Total de pacientes ativas.
     df_pacientes = pd.read_sql_query(
         """
         SELECT COUNT(*) AS total
@@ -299,14 +359,9 @@ try:
         conn,
     )
 
-    total_mulheres = int(
-        df_pacientes.iloc[0]["total"]
-    )
+    total_mulheres = int(df_pacientes.iloc[0]["total"])
 
-    # -----------------------------------------------------
-    # Calores registrados nos diários: últimos 7 dias
-    # -----------------------------------------------------
-
+    # Calores registrados nos diários: últimos 7 dias.
     df_diario_semana = pd.read_sql_query(
         """
         SELECT COALESCE(SUM(calores), 0) AS total
@@ -318,14 +373,9 @@ try:
         params=parametros_7_dias,
     )
 
-    total_diario = int(
-        df_diario_semana.iloc[0]["total"] or 0
-    )
+    total_diario = int(df_diario_semana.iloc[0]["total"] or 0)
 
-    # -----------------------------------------------------
-    # Episódios avulsos: últimos 7 dias
-    # -----------------------------------------------------
-
+    # Episódios avulsos: últimos 7 dias.
     df_avulso_semana = pd.read_sql_query(
         """
         SELECT COUNT(*) AS total
@@ -337,18 +387,10 @@ try:
         params=parametros_7_dias,
     )
 
-    total_avulso = int(
-        df_avulso_semana.iloc[0]["total"] or 0
-    )
+    total_avulso = int(df_avulso_semana.iloc[0]["total"] or 0)
+    total_calores_semana = total_diario + total_avulso
 
-    total_calores_semana = (
-        total_diario + total_avulso
-    )
-
-    # -----------------------------------------------------
-    # Gráfico: registros diários dos últimos 14 dias
-    # -----------------------------------------------------
-
+    # Gráfico: registros diários dos últimos 14 dias.
     df_diario = pd.read_sql_query(
         """
         SELECT
@@ -364,10 +406,7 @@ try:
         params=parametros_14_dias,
     )
 
-    # -----------------------------------------------------
-    # Gráfico: episódios avulsos dos últimos 14 dias
-    # -----------------------------------------------------
-
+    # Gráfico: episódios avulsos dos últimos 14 dias.
     df_avulso = pd.read_sql_query(
         """
         SELECT
@@ -383,15 +422,8 @@ try:
         params=parametros_14_dias,
     )
 
-    df_diario["dia"] = pd.to_datetime(
-        df_diario["dia"],
-        errors="coerce",
-    )
-
-    df_avulso["dia"] = pd.to_datetime(
-        df_avulso["dia"],
-        errors="coerce",
-    )
+    df_diario["dia"] = pd.to_datetime(df_diario["dia"], errors="coerce")
+    df_avulso["dia"] = pd.to_datetime(df_avulso["dia"], errors="coerce")
 
     df_grafico = pd.merge(
         df_diario,
@@ -401,27 +433,22 @@ try:
         suffixes=("_diario", "_avulso"),
     )
 
-    df_grafico["total_diario"] = (
-        df_grafico["total_diario"].fillna(0)
-    )
-
-    df_grafico["total_avulso"] = (
-        df_grafico["total_avulso"].fillna(0)
-    )
-
+    df_grafico["total_diario"] = df_grafico["total_diario"].fillna(0)
+    df_grafico["total_avulso"] = df_grafico["total_avulso"].fillna(0)
     df_grafico["total_calores"] = (
-        df_grafico["total_diario"]
-        + df_grafico["total_avulso"]
+        df_grafico["total_diario"] + df_grafico["total_avulso"]
     )
 
     # Inclui também os dias sem registros.
-    calendario = pd.DataFrame({
-        "dia": pd.date_range(
-            end=pd.Timestamp(hoje),
-            periods=14,
-            freq="D",
-        )
-    })
+    calendario = pd.DataFrame(
+        {
+            "dia": pd.date_range(
+                end=pd.Timestamp(hoje),
+                periods=14,
+                freq="D",
+            )
+        }
+    )
 
     df_grafico = calendario.merge(
         df_grafico[["dia", "total_calores"]],
@@ -430,69 +457,39 @@ try:
     )
 
     df_grafico["total_calores"] = (
-        df_grafico["total_calores"]
-        .fillna(0)
-        .astype(int)
+        df_grafico["total_calores"].fillna(0).astype(int)
     )
+    df_grafico["dia_label"] = df_grafico["dia"].dt.strftime("%d/%m")
 
-    df_grafico["dia_label"] = (
-        df_grafico["dia"].dt.strftime("%d/%m")
-    )
-
-    # -----------------------------------------------------
-    # TODAS AS PACIENTES ATIVAS
-    # Inclui pacientes sem diário recente.
-    # -----------------------------------------------------
-
+    # Todas as pacientes ativas, inclusive quem não tem diário recente.
     query_acompanhamento = """
         WITH diarios_semana AS (
             SELECT
                 identificador,
-
-                AVG(
-                    CAST(COALESCE(calores, 0) AS REAL)
-                ) AS media_calores,
-
+                AVG(CAST(COALESCE(calores, 0) AS REAL)) AS media_calores,
                 MAX(
                     CASE
-                        WHEN TRIM(CAST(sono AS TEXT)) = '1'
-                        THEN 1
+                        WHEN TRIM(CAST(sono AS TEXT)) = '1' THEN 1
                         ELSE 0
                     END
                 ) AS sono_ruim,
-
-                COUNT(DISTINCT date(data))
-                    AS dias_registrados
-
+                COUNT(DISTINCT date(data)) AS dias_registrados
             FROM registros_diarios
-
             WHERE date(data)
                 BETWEEN date(?, '-6 days') AND date(?)
-
             GROUP BY identificador
         )
-
         SELECT
             u.identificador,
             u.apelido,
             u.idade,
-
-            COALESCE(d.media_calores, 0)
-                AS media_calores,
-
-            COALESCE(d.sono_ruim, 0)
-                AS sono_ruim,
-
-            COALESCE(d.dias_registrados, 0)
-                AS dias_registrados
-
+            COALESCE(d.media_calores, 0) AS media_calores,
+            COALESCE(d.sono_ruim, 0) AS sono_ruim,
+            COALESCE(d.dias_registrados, 0) AS dias_registrados
         FROM usuarias u
-
         LEFT JOIN diarios_semana d
             ON u.identificador = d.identificador
-
         WHERE u.ativo = 1
-
         ORDER BY u.apelido
     """
 
@@ -507,7 +504,7 @@ finally:
 
 
 # =========================================================
-# CLASSIFICAÇÃO DAS PRIORIDADES
+# CLASSIFICAÇÃO ADMINISTRATIVA DAS PRIORIDADES
 # =========================================================
 
 df_acompanhamento["media_calores"] = pd.to_numeric(
@@ -527,11 +524,7 @@ df_acompanhamento["dias_registrados"] = pd.to_numeric(
 
 
 def classificar_prioridade(row):
-    """
-    Classificação administrativa para organizar a revisão.
-    Não representa diagnóstico nem triagem clínica validada.
-    """
-
+    """Classificação administrativa; não representa diagnóstico clínico."""
     if row["dias_registrados"] == 0:
         return "Sem diário recente"
 
@@ -539,7 +532,7 @@ def classificar_prioridade(row):
     sono_sinalizado = row["sono_ruim"] == 1
 
     if muitos_calores and sono_sinalizado:
-        return "Maior urgência"
+        return "Alta urgência"
 
     if muitos_calores or sono_sinalizado:
         return "Média urgência"
@@ -547,24 +540,20 @@ def classificar_prioridade(row):
     return "Baixa urgência"
 
 
-df_acompanhamento["prioridade"] = (
-    df_acompanhamento.apply(
-        classificar_prioridade,
-        axis=1,
-    )
+df_acompanhamento["prioridade"] = df_acompanhamento.apply(
+    classificar_prioridade,
+    axis=1,
 )
 
 ordem_prioridade = {
-    "Maior urgência": 0,
+    "Alta urgência": 0,
     "Média urgência": 1,
     "Baixa urgência": 2,
     "Sem diário recente": 3,
 }
 
-df_acompanhamento["_ordem"] = (
-    df_acompanhamento["prioridade"].map(
-        ordem_prioridade
-    )
+df_acompanhamento["_ordem"] = df_acompanhamento["prioridade"].map(
+    ordem_prioridade
 )
 
 df_acompanhamento = (
@@ -587,36 +576,25 @@ renderizar_html(
     <div class="container-fluid px-0 mb-4">
         <div class="dashboard-header">
             <div class="d-flex flex-wrap justify-content-between align-items-start gap-4">
-
                 <div class="flex-grow-1">
                     <div class="dashboard-eyebrow">
                         Atenção Primária à Saúde
                     </div>
-
                     <h1 class="dashboard-title">
                         Acompanhamento da Saúde da Mulher
                     </h1>
-
                     <p class="dashboard-description">
                         Visão consolidada dos registros de sintomas
                         e do acompanhamento das pacientes.
                     </p>
                 </div>
-
                 <div class="period-card">
-                    <div class="period-label">
-                        Período de referência
-                    </div>
-
-                    <div class="period-value">
-                        Últimos 7 dias
-                    </div>
-
+                    <div class="period-label">Período de referência</div>
+                    <div class="period-value">Últimos 7 dias</div>
                     <div class="period-date">
                         Atualizado em {html.escape(data_formatada)}
                     </div>
                 </div>
-
             </div>
         </div>
     </div>
@@ -639,7 +617,6 @@ st.info(
 # =========================================================
 
 st.subheader("Visão geral")
-
 st.markdown(
     """
     <p class="section-description">
@@ -655,55 +632,33 @@ renderizar_html(
     f"""
     <div class="container-fluid px-0 mb-4">
         <div class="row g-3">
-
             <div class="col-12 col-md-4">
                 <div class="card metric-card h-100">
                     <div class="card-body p-4">
-                        <div class="metric-label">
-                            Pacientes em acompanhamento
-                        </div>
-                        <div class="metric-value">
-                            {formatar_inteiro(total_mulheres)}
-                        </div>
-                        <div class="metric-note">
-                            Pacientes com cadastro ativo
-                        </div>
+                        <div class="metric-label">Pacientes em acompanhamento</div>
+                        <div class="metric-value">{formatar_inteiro(total_mulheres)}</div>
+                        <div class="metric-note">Pacientes com cadastro ativo</div>
                     </div>
                 </div>
             </div>
-
             <div class="col-12 col-md-4">
                 <div class="card metric-card h-100">
                     <div class="card-body p-4">
-                        <div class="metric-label">
-                            Ondas de calor registradas
-                        </div>
-                        <div class="metric-value">
-                            {formatar_inteiro(total_calores_semana)}
-                        </div>
-                        <div class="metric-note">
-                            Diários e episódios avulsos
-                        </div>
+                        <div class="metric-label">Ondas de calor registradas</div>
+                        <div class="metric-value">{formatar_inteiro(total_calores_semana)}</div>
+                        <div class="metric-note">Diários e episódios avulsos</div>
                     </div>
                 </div>
             </div>
-
             <div class="col-12 col-md-4">
                 <div class="card metric-card h-100">
                     <div class="card-body p-4">
-                        <div class="metric-label">
-                            Período analisado
-                        </div>
-                        <div class="metric-value">
-                            7 dias
-                        </div>
-                        <div class="metric-note">
-                            Inclui a data de hoje
-                        </div>
+                        <div class="metric-label">Período analisado</div>
+                        <div class="metric-value">7 dias</div>
+                        <div class="metric-note">Inclui a data de hoje</div>
                     </div>
                 </div>
             </div>
-
         </div>
     </div>
     """
@@ -713,42 +668,60 @@ st.divider()
 
 
 # =========================================================
-# 2. GRÁFICO GERAL
+# 2. GRÁFICO DE BARRAS: FREQUÊNCIA DE ONDAS DE CALOR
 # =========================================================
 
 st.subheader("Frequência diária de ondas de calor")
-
 st.markdown(
     """
     <p class="section-description">
-        Total de calores informados nos diários e nos
-        registros avulsos ao longo dos últimos 14 dias.
+        Total de calores informados nos diários e nos registros avulsos
+        ao longo dos últimos 14 dias.
     </p>
     """,
     unsafe_allow_html=True,
 )
 
 if df_grafico["total_calores"].sum() > 0:
+    fig_barras, ax_barras = plt.subplots(figsize=(12, 5))
 
-    st.bar_chart(
-        data=df_grafico,
-        x="dia_label",
-        y="total_calores",
+    ax_barras.bar(
+        df_grafico["dia_label"],
+        df_grafico["total_calores"],
         color="#496F8A",
-        use_container_width=True,
+        width=0.72,
     )
+    ax_barras.set_title(
+        "Episódios registrados por dia",
+        fontsize=14 * ESCALA_FONTES,
+        fontweight="bold",
+    )
+    ax_barras.set_xlabel("Data", fontsize=11 * ESCALA_FONTES)
+    ax_barras.set_ylabel("Número de episódios", fontsize=11 * ESCALA_FONTES)
+    ax_barras.tick_params(
+        axis="x",
+        labelsize=9 * ESCALA_FONTES,
+        rotation=0,
+    )
+    ax_barras.tick_params(
+        axis="y",
+        labelsize=9 * ESCALA_FONTES,
+    )
+    ax_barras.grid(axis="y", linestyle="--", alpha=0.25)
+    ax_barras.set_axisbelow(True)
+    fig_barras.tight_layout()
+
+    st.pyplot(fig_barras, use_container_width=True)
+    plt.close(fig_barras)
 
     st.caption(
         "Os valores representam a soma dos registros diários "
         "e dos episódios avulsos em cada data."
     )
-
 else:
-
     st.info(
         "Ainda não existem registros de calores no período selecionado."
     )
-
 
 st.divider()
 
@@ -758,129 +731,204 @@ st.divider()
 # =========================================================
 
 st.subheader("Acompanhamento de pacientes")
-
 st.markdown(
     """
     <p class="section-description">
-        Consulte todas as pacientes ativas e filtre a lista
-        conforme os critérios de revisão dos registros recentes.
+        Consulte todas as pacientes ativas e filtre a lista conforme
+        os critérios de revisão dos registros recentes.
     </p>
     """,
     unsafe_allow_html=True,
 )
-
 st.caption(
-    "Os níveis são critérios administrativos definidos para este "
+    "As categorias são critérios administrativos definidos para este "
     "sistema, não uma classificação clínica validada."
 )
 
 
-# ---------------------------------------------------------
-# Contagem de cada categoria
-# ---------------------------------------------------------
+# =========================================================
+# CONTAGEM DE CADA CATEGORIA
+# =========================================================
 
-contagens = (
-    df_acompanhamento["prioridade"].value_counts()
-)
-
+contagens = df_acompanhamento["prioridade"].value_counts()
 total_pacientes = len(df_acompanhamento)
 
-qtd_maior = int(
-    contagens.get("Maior urgência", 0)
-)
-
-qtd_media = int(
-    contagens.get("Média urgência", 0)
-)
-
-qtd_baixa = int(
-    contagens.get("Baixa urgência", 0)
-)
-
-qtd_sem_diario = int(
-    contagens.get("Sem diário recente", 0)
-)
+qtd_alta = int(contagens.get("Alta urgência", 0))
+qtd_media = int(contagens.get("Média urgência", 0))
+qtd_baixa = int(contagens.get("Baixa urgência", 0))
+qtd_sem_diario = int(contagens.get("Sem diário recente", 0))
 
 
-# ---------------------------------------------------------
-# Cartões de contagem
-# ---------------------------------------------------------
+# =========================================================
+# CARTÕES DE CONTAGEM
+# =========================================================
 
 renderizar_html(
     f"""
     <div class="container-fluid px-0 mb-4">
         <div class="row g-3">
-
             <div class="col-12 col-md-3">
-                <div class="card metric-card h-100"
-                     style="border-top: 4px solid #B42318 !important;">
+                <div class="card metric-card h-100" style="border-top: 4px solid #B42318 !important;">
                     <div class="card-body p-3">
-                        <div class="metric-label">Maior urgência</div>
-                        <div class="metric-value">
-                            {qtd_maior}
-                        </div>
+                        <div class="metric-label">Alta urgência</div>
+                        <div class="metric-value">{qtd_alta}</div>
                     </div>
                 </div>
             </div>
-
             <div class="col-12 col-md-3">
-                <div class="card metric-card h-100"
-                     style="border-top: 4px solid #946200 !important;">
+                <div class="card metric-card h-100" style="border-top: 4px solid #946200 !important;">
                     <div class="card-body p-3">
                         <div class="metric-label">Média urgência</div>
-                        <div class="metric-value">
-                            {qtd_media}
-                        </div>
+                        <div class="metric-value">{qtd_media}</div>
                     </div>
                 </div>
             </div>
-
             <div class="col-12 col-md-3">
-                <div class="card metric-card h-100"
-                     style="border-top: 4px solid #26734D !important;">
+                <div class="card metric-card h-100" style="border-top: 4px solid #26734D !important;">
                     <div class="card-body p-3">
                         <div class="metric-label">Baixa urgência</div>
-                        <div class="metric-value">
-                            {qtd_baixa}
-                        </div>
+                        <div class="metric-value">{qtd_baixa}</div>
                     </div>
                 </div>
             </div>
-
             <div class="col-12 col-md-3">
-                <div class="card metric-card h-100"
-                     style="border-top: 4px solid #596579 !important;">
+                <div class="card metric-card h-100" style="border-top: 4px solid #596579 !important;">
                     <div class="card-body p-3">
                         <div class="metric-label">Sem diário recente</div>
-                        <div class="metric-value">
-                            {qtd_sem_diario}
-                        </div>
+                        <div class="metric-value">{qtd_sem_diario}</div>
                     </div>
                 </div>
             </div>
-
         </div>
     </div>
     """
 )
 
 
-# ---------------------------------------------------------
-# Filtros: prioridade e busca
-# ---------------------------------------------------------
+# =========================================================
+# GRÁFICO DE PIZZA: PERCENTUAL POR PRIORIDADE
+# =========================================================
 
-col_filtro, col_busca = st.columns(
-    [1.2, 1],
-    gap="medium",
+st.markdown("### Distribuição percentual por prioridade")
+st.markdown(
+    """
+    <p class="section-description">
+        Percentual de pacientes classificadas em alta, média e baixa
+        urgência conforme os registros recentes.
+    </p>
+    """,
+    unsafe_allow_html=True,
 )
 
-with col_filtro:
+categorias_pizza = [
+    "Alta urgência",
+    "Média urgência",
+    "Baixa urgência",
+]
+quantidades_pizza = [qtd_alta, qtd_media, qtd_baixa]
+total_classificadas = sum(quantidades_pizza)
 
+if total_classificadas > 0:
+    col_grafico_pizza, col_resumo_pizza = st.columns(
+        [1.3, 1],
+        gap="large",
+    )
+
+    with col_grafico_pizza:
+        fig_pizza, ax_pizza = plt.subplots(figsize=(8, 6))
+        cores_pizza = ["#C62828", "#F9A825", "#2E7D32"]
+        rotulos_pizza = [
+            f"{categoria}\n(n = {quantidade})"
+            for categoria, quantidade in zip(
+                categorias_pizza,
+                quantidades_pizza,
+            )
+        ]
+
+        _, textos_pizza, textos_percentuais = ax_pizza.pie(
+            quantidades_pizza,
+            labels=rotulos_pizza,
+            colors=cores_pizza,
+            autopct=lambda percentual: (
+                f"{percentual:.1f}%" if percentual > 0 else ""
+            ),
+            startangle=90,
+            counterclock=False,
+            pctdistance=0.62,
+            labeldistance=1.12,
+            wedgeprops={
+                "edgecolor": "white",
+                "linewidth": 2,
+            },
+            textprops={
+                "fontsize": 10 * ESCALA_FONTES,
+            },
+        )
+
+        for texto_percentual in textos_percentuais:
+            texto_percentual.set_color("white")
+            texto_percentual.set_fontweight("bold")
+            texto_percentual.set_fontsize(11 * ESCALA_FONTES)
+
+        for texto_rotulo in textos_pizza:
+            texto_rotulo.set_fontsize(10 * ESCALA_FONTES)
+
+        ax_pizza.set_title(
+            "Pacientes por nível de urgência",
+            fontsize=14 * ESCALA_FONTES,
+            fontweight="bold",
+            pad=18,
+        )
+        ax_pizza.axis("equal")
+        fig_pizza.tight_layout()
+
+        st.pyplot(fig_pizza, use_container_width=True)
+        plt.close(fig_pizza)
+
+    with col_resumo_pizza:
+        st.markdown("#### Percentuais por categoria")
+
+        for categoria, quantidade in zip(
+            categorias_pizza,
+            quantidades_pizza,
+        ):
+            percentual = quantidade / total_classificadas * 100
+            st.metric(
+                label=categoria,
+                value=f"{percentual:.1f}%",
+                delta=f"{quantidade} paciente(s)",
+                delta_color="off",
+            )
+
+        st.caption(
+            f"Total classificado: {total_classificadas} paciente(s)."
+        )
+
+    st.info(
+        "O gráfico considera somente pacientes classificadas em alta, "
+        "média ou baixa urgência. Pacientes sem diário recente ficam fora "
+        "do cálculo porque não há registros recentes suficientes para "
+        "classificá-las com esses critérios."
+    )
+else:
+    st.info(
+        "Ainda não há pacientes classificadas em alta, média ou baixa "
+        "urgência para gerar o gráfico."
+    )
+
+
+# =========================================================
+# FILTROS: PRIORIDADE E BUSCA
+# =========================================================
+
+col_filtro, col_busca = st.columns([1.2, 1], gap="medium")
+
+with col_filtro:
     prioridade_selecionada = st.selectbox(
         "Filtrar por prioridade",
         options=[
             "Todas as pacientes",
-            "Maior urgência",
+            "Alta urgência",
             "Média urgência",
             "Baixa urgência",
             "Sem diário recente",
@@ -890,32 +938,25 @@ with col_filtro:
     )
 
 with col_busca:
-
     texto_busca = st.text_input(
         "Buscar paciente",
-        placeholder="Digite o apelido da paciente",
+        placeholder="Digite o nome/apelido da paciente",
         key="busca_paciente",
     )
 
 
-# ---------------------------------------------------------
-# Aplica os filtros
-# ---------------------------------------------------------
+# =========================================================
+# APLICA OS FILTROS
+# =========================================================
 
 if prioridade_selecionada == "Todas as pacientes":
-
     df_filtrado = df_acompanhamento.copy()
-
 else:
-
     df_filtrado = df_acompanhamento[
-        df_acompanhamento["prioridade"]
-        == prioridade_selecionada
+        df_acompanhamento["prioridade"] == prioridade_selecionada
     ].copy()
 
-
 if texto_busca.strip():
-
     df_filtrado = df_filtrado[
         df_filtrado["apelido"]
         .fillna("")
@@ -928,49 +969,44 @@ if texto_busca.strip():
         )
     ]
 
-
 st.caption(
-    f"Exibindo {len(df_filtrado)} de "
-    f"{total_pacientes} pacientes ativas."
+    f"Exibindo {len(df_filtrado)} de {total_pacientes} pacientes ativas."
 )
 
 
-# ---------------------------------------------------------
-# Cores das categorias
-# ---------------------------------------------------------
+# =========================================================
+# CORES DAS CATEGORIAS
+# =========================================================
+
+# =========================================================
+# CORES DAS CATEGORIAS NO PAINEL
+# =========================================================
 
 cores_prioridade = {
-    "Maior urgência": "#B42318",
-    "Média urgência": "#946200",
     "Baixa urgência": "#26734D",
+    "Média urgência": "#946200",
+    "Alta urgência": "#B42318",
     "Sem diário recente": "#596579",
 }
 
 fundos_prioridade = {
-    "Maior urgência": "#FDECEC",
-    "Média urgência": "#FFF4D6",
     "Baixa urgência": "#E8F5ED",
+    "Média urgência": "#FFF4D6",
+    "Alta urgência": "#FDECEC",
     "Sem diário recente": "#EEF1F5",
 }
 
-
-# ---------------------------------------------------------
-# Lista de pacientes
-# ---------------------------------------------------------
+# =========================================================
+# LISTA DE PACIENTES
+# =========================================================
 
 if df_filtrado.empty:
-
-    st.info(
-        "Nenhuma paciente corresponde aos filtros selecionados."
-    )
-
+    st.info("Nenhuma paciente corresponde aos filtros selecionados.")
 else:
-
     cab1, cab2, cab3, cab4 = st.columns(
         [1.8, 2.5, 2.0, 1.8],
         gap="medium",
     )
-
     cab1.markdown("**Paciente**")
     cab2.markdown("**Prioridade e motivo**")
     cab3.markdown("**Registros recentes**")
@@ -979,72 +1015,38 @@ else:
     st.divider()
 
     for _, row in df_filtrado.iterrows():
-
         identificador = row["identificador"]
-
-        apelido = str(
-            row["apelido"] or "Paciente"
-        ).strip()
-
+        apelido = str(row["apelido"] or "Paciente").strip()
         idade = row["idade"]
-
-        media_calores = float(
-            row["media_calores"]
-        )
-
-        sono_ruim = int(
-            row["sono_ruim"]
-        )
-
-        dias_registrados = int(
-            row["dias_registrados"]
-        )
-
+        media_calores = float(row["media_calores"])
+        sono_ruim = int(row["sono_ruim"])
+        dias_registrados = int(row["dias_registrados"])
         prioridade = row["prioridade"]
 
         cor = cores_prioridade[prioridade]
         fundo = fundos_prioridade[prioridade]
 
-        # Chaves individuais para os botões e o arquivo.
         chave_png = f"relatorio_png_{identificador}"
         chave_nome = f"relatorio_nome_{identificador}"
         chave_gerar = f"gerar_relatorio_{identificador}"
 
         with st.container(border=True):
-
             c1, c2, c3, c4 = st.columns(
                 [1.8, 2.5, 2.0, 1.8],
                 gap="medium",
             )
 
-            # ---------------------------------------------
-            # Nome e idade
-            # ---------------------------------------------
-
+            # Nome e idade.
             with c1:
-
-                st.markdown(
-                    f"**{html.escape(apelido)}**"
-                )
+                st.markdown(f"**{html.escape(apelido)}**")
 
                 if pd.notna(idade):
-
-                    st.caption(
-                        f"{int(idade)} anos"
-                    )
-
+                    st.caption(f"{int(idade)} anos")
                 else:
+                    st.caption("Idade não informada")
 
-                    st.caption(
-                        "Idade não informada"
-                    )
-
-            # ---------------------------------------------
-            # Prioridade e justificativa
-            # ---------------------------------------------
-
+            # Prioridade e justificativa.
             with c2:
-
                 renderizar_html(
                     f"""
                     <span style="
@@ -1054,167 +1056,90 @@ else:
                         border: 1px solid {cor}33;
                         border-radius: 5px;
                         padding: 4px 9px;
-                        font-size: 0.8rem;
+                        font-size: {tamanho_fonte_rem(0.8)};
                         font-weight: 700;
                     ">{html.escape(prioridade)}</span>
                     """
                 )
 
-                if prioridade == "Maior urgência":
-
+                if prioridade == "Alta urgência":
                     st.caption(
-                        "Média elevada de calores e "
-                        "registro de sono sinalizado."
+                        "Média elevada de calores e registro de sono sinalizado."
                     )
-
                 elif prioridade == "Média urgência":
-
                     motivos = []
-
                     if media_calores >= 4:
-
-                        motivos.append(
-                            "Média elevada de calores"
-                        )
-
+                        motivos.append("Média elevada de calores")
                     if sono_ruim == 1:
-
-                        motivos.append(
-                            "Sono sinalizado"
-                        )
-
-                    st.caption(
-                        " e ".join(motivos) + "."
-                    )
-
+                        motivos.append("Sono sinalizado")
+                    st.caption(" e ".join(motivos) + ".")
                 elif prioridade == "Baixa urgência":
-
                     st.caption(
-                        "Nenhum dos critérios atuais "
-                        "de prioridade foi identificado."
+                        "Nenhum dos critérios atuais de prioridade foi identificado."
                     )
-
                 else:
-
                     st.caption(
-                        "Sem diário recente para avaliar "
-                        "pelos critérios atuais."
+                        "Sem diário recente para avaliar pelos critérios atuais."
                     )
 
-            # ---------------------------------------------
-            # Dados do diário
-            # ---------------------------------------------
-
+            # Dados do diário.
             with c3:
-
                 if dias_registrados > 0:
-
-                    st.markdown(
-                        f"**{dias_registrados} dia(s)**"
-                    )
-
+                    st.markdown(f"**{dias_registrados} dia(s)**")
                     st.caption(
-                        f"Média de {media_calores:.1f} "
-                        "calores por diário."
+                        f"Média de {media_calores:.1f} calores por diário."
                     )
-
                     if sono_ruim == 1:
-
-                        st.caption(
-                            "Sono sinalizado nos registros."
-                        )
-
+                        st.caption("Sono sinalizado nos registros.")
                 else:
-
-                    st.markdown(
-                        "**Sem diário recente**"
-                    )
-
+                    st.markdown("**Sem diário recente**")
                     st.caption(
-                        "Não há registros suficientes "
-                        "para esta classificação."
+                        "Não há registros suficientes para esta classificação."
                     )
 
-            # ---------------------------------------------
-            # Geração e download do relatório
-            # ---------------------------------------------
-
+            # Gerar e baixar relatório.
             with c4:
-
                 if st.button(
                     "Gerar relatório",
                     key=chave_gerar,
                     use_container_width=True,
                     type="primary",
                 ):
-
-                    # Remove uma versão anterior antes de gerar.
-                    st.session_state.pop(
-                        chave_png,
-                        None,
-                    )
-
-                    st.session_state.pop(
-                        chave_nome,
-                        None,
-                    )
+                    st.session_state.pop(chave_png, None)
+                    st.session_state.pop(chave_nome, None)
 
                     try:
-
-                        with st.spinner(
-                            "Preparando relatório..."
-                        ):
-
-                            dados_relatorio = (
-                                db.obter_dados_completos_relatorio(
-                                    identificador
-                                )
+                        with st.spinner("Preparando relatório..."):
+                            dados_relatorio = db.obter_dados_completos_relatorio(
+                                identificador
                             )
 
                             if not dados_relatorio:
-
                                 st.warning(
-                                    "Não há dados para gerar "
-                                    "o relatório desta paciente."
+                                    "Não há dados para gerar o relatório desta paciente."
                                 )
-
                             else:
-
-                                imagem_buffer = (
-                                    gerador_relatorio.gerar_png_relatorio(
-                                        dados_relatorio
-                                    )
+                                imagem_buffer = gerador_relatorio.gerar_png_relatorio(
+                                    dados_relatorio
                                 )
-
-                                # Guarda os bytes na sessão.
-                                st.session_state[chave_png] = (
-                                    imagem_buffer.getvalue()
-                                )
+                                st.session_state[chave_png] = imagem_buffer.getvalue()
 
                                 nome_seguro = re.sub(
                                     r"[^a-zA-Z0-9_-]+",
                                     "_",
                                     apelido.lower(),
                                 ).strip("_")
-
                                 if not nome_seguro:
-
                                     nome_seguro = "paciente"
 
                                 st.session_state[chave_nome] = (
                                     f"diario_{nome_seguro}.png"
                                 )
+                    except Exception:
+                        logging_msg = "Não foi possível gerar o relatório desta paciente."
+                        st.error(logging_msg)
 
-                    except Exception as erro:
-
-                        st.error(
-                            "Não foi possível gerar o relatório: "
-                            f"{erro}"
-                        )
-
-                # O botão de download aparece após gerar o PNG.
                 if chave_png in st.session_state:
-
                     st.download_button(
                         "Baixar PNG",
                         data=st.session_state[chave_png],
@@ -1235,9 +1160,8 @@ renderizar_html(
     """
     <footer class="container-fluid px-0 pt-2 pb-3">
         <p class="small text-secondary mb-0">
-            Painel de apoio ao acompanhamento. Os indicadores
-            dependem dos registros disponíveis e não substituem
-            a avaliação clínica individual.
+            Painel de apoio ao acompanhamento. Os indicadores dependem dos
+            registros disponíveis e não substituem a avaliação clínica individual.
         </p>
     </footer>
     """

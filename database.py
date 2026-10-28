@@ -67,20 +67,42 @@ def pegar_data_hora_atual():
     completo = agora.strftime("%Y-%m-%d %H:%M:%S")
     return data, hora, completo
 
+
 def salvar_usuaria(identificador, dados):
-    """Salva a mulher no banco após o consentimento e triagem."""
+    """Salva os dados da usuária, incluindo o nome informado no cadastro."""
     _, _, data_completa = pegar_data_hora_atual()
+
+    # O cadastro coleta nome_completo, não apelido.
+    nome = (
+        dados.get("nome_completo")
+        or dados.get("apelido")
+        or ""
+    ).strip()
+
     conn = conectar()
     cursor = conn.cursor()
+
     cursor.execute("""
-        INSERT OR REPLACE INTO usuarias 
-        (identificador, apelido, bairro, consentimento, idade, ciclo, calores_triagem, sono_triagem, humor_triagem, ativo, data_cadastro)
+        INSERT OR REPLACE INTO usuarias
+        (
+            identificador,
+            apelido,
+            bairro,
+            consentimento,
+            idade,
+            ciclo,
+            calores_triagem,
+            sono_triagem,
+            humor_triagem,
+            ativo,
+            data_cadastro
+        )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
     """, (
         identificador,
-        dados.get("apelido"),
+        nome,
         dados.get("bairro"),
-        1, # Consentimento afirmativo gravado como 1
+        1,
         dados.get("idade"),
         dados.get("ciclo"),
         dados.get("calores"),
@@ -88,8 +110,10 @@ def salvar_usuaria(identificador, dados):
         dados.get("humor"),
         data_completa
     ))
+
     conn.commit()
     conn.close()
+
 
 def salvar_diario(identificador, calores_qtd, sono, humor):
     """Salva as perguntas do dia a dia."""
@@ -158,32 +182,57 @@ def obter_relatorio_calores(identificador):
     conn.close()
     return total_diario + total_avulsos
 
+
 def obter_dados_completos_relatorio(identificador):
     conn = conectar()
     cursor = conn.cursor()
-    cursor.execute("SELECT apelido, data_cadastro FROM usuarias WHERE identificador = ?", (identificador,))
+
+    cursor.execute("""
+        SELECT apelido, data_cadastro
+        FROM usuarias
+        WHERE identificador = ?
+    """, (identificador,))
+
     perfil = cursor.fetchone()
+
     if not perfil:
         conn.close()
         return None
-    apelido = perfil[0] or "Usuária"
+
+    nome = (perfil[0] or "").strip()
     data_cadastro = perfil[1]
-    
-    # Busca dados nas novas tabelas
-    cursor.execute("SELECT data, calores, sono, humor FROM registros_diarios WHERE identificador = ?", (identificador,))
+
+    cursor.execute("""
+        SELECT data, calores, sono, humor
+        FROM registros_diarios
+        WHERE identificador = ?
+    """, (identificador,))
+
     diarios = cursor.fetchall()
-    
-    cursor.execute("SELECT data, hora FROM episodios_calor WHERE identificador = ?", (identificador,))
+
+    cursor.execute("""
+        SELECT data, hora
+        FROM episodios_calor
+        WHERE identificador = ?
+    """, (identificador,))
+
     avulsos = cursor.fetchall()
-    
+
     conn.close()
-    
-    # Formata de volta para o padrão que o gerador_relatorio.py espera ler
-    diarios_formatados = [(f"{d[0]} 00:00:00", d[1], d[2], d[3]) for d in diarios]
-    avulsos_formatados = [(f"{a[0]} {a[1]}:00",) for a in avulsos]
-    
+
+    diarios_formatados = [
+        (f"{d[0]} 00:00:00", d[1], d[2], d[3])
+        for d in diarios
+    ]
+
+    avulsos_formatados = [
+        (f"{a[0]} {a[1]}:00",)
+        for a in avulsos
+    ]
+
     return {
-        "apelido": apelido,
+        "nome_completo": nome or "Nome não informado",
+        "apelido": nome,
         "data_cadastro": data_cadastro,
         "diarios": diarios_formatados,
         "avulsos": avulsos_formatados
